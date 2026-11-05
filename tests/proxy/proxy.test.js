@@ -170,6 +170,14 @@ test("Supabase 오류는 502", () => {
   p2.sent[0].emit("error", new Error("ECONNRESET"));
   assert.equal(res.statusCode, 502);
   assert.deepEqual(res.json(), { error: "데이터베이스에 연결하지 못했어요" });
+
+  // 주소에 https:// 가 빠진 잘못된 설정: 함수가 죽지 않고 502
+  const p3 = loadProxy({ SUPABASE_URL: "abc.supabase.co", SUPABASE_ANON_KEY: KEY });
+  const res3 = fakeRes();
+  p3.handler({ method: "GET", query: { action: "state" } }, res3);
+  if (p3.sent.length) p3.sent[0].emit("error", new Error("ENOTFOUND"));
+  assert.equal(res3.statusCode, 502);
+  assert.deepEqual(res3.json(), { error: "데이터베이스에 연결하지 못했어요" });
 });
 
 test("환경변수 없으면 500, 다른 이름도 받고 BOM/공백/끝 / 는 지운다", () => {
