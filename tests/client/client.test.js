@@ -276,7 +276,7 @@ test("참가하기: /api/join 보내고, 서버 시계를 맞추고, 대기실�
   assert.deepEqual(JSON.parse(g.sandbox.sessionStorage.getItem("tr_locals")), [{ id: "abc", ai: false }]);
   assert.ok(Math.abs(h.serverOffset(g) - 500) < 1, "서버 시계 차이");
   assert.equal(h.el(g, "joinBtn").disabled, false);
-  assert.equal(h.el(g, "lobbyCount").innerHTML, 1);
+  assert.equal(h.el(g, "lobbyCount").innerHTML, "1");
 });
 
 test("참가하기: 닉네임이 비면 요청 안 함, 서버 오류는 화면에 표시", () => {
@@ -317,7 +317,7 @@ test("대기실: 이름은 이스케이프되고, 서버 목록에 없는 내 �
   assert.ok(html.includes("&lt;img src=x&gt;"));
   assert.ok(!html.includes("<img"));
   assert.ok(html.includes("다른 기기"));
-  assert.equal(h.el(g, "lobbyCount").innerHTML, 2);
+  assert.equal(h.el(g, "lobbyCount").innerHTML, "2");
 });
 
 test("사람 차가 모두 빠지면 컴퓨터도 내보내고 참가 화면으로", () => {

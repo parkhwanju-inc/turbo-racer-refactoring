@@ -34,19 +34,43 @@ function makeCtx2d() {
   });
 }
 
+const escapeText = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// 브라우저처럼: innerHTML 은 항상 문자열, textContent 는 이스케이프되어 innerHTML 에 보임
 function makeElement(id, ctx2d) {
-  return {
-    id, value: "", innerHTML: "", className: "", style: {}, disabled: false,
+  let html = "";
+  const el = {
+    id, value: "", className: "", style: {}, disabled: false,
     attrs: {}, listeners: {}, children: [],
     clientWidth: 1280, clientHeight: 720, width: 0, height: 0,
+    get innerHTML() { return html; },
+    set innerHTML(v) { html = String(v); },
+    get textContent() { return html; },
+    set textContent(v) { html = escapeText(v); },
+    classList: {
+      contains: (c) => el.className.split(/\s+/).indexOf(c) > -1,
+      add: (c) => { if (!el.classList.contains(c)) el.className = (el.className + " " + c).trim(); },
+      remove: (c) => { el.className = el.className.split(/\s+/).filter((x) => x && x !== c).join(" "); },
+      toggle: (c, force) => {
+        const on = force === undefined ? !el.classList.contains(c) : !!force;
+        if (on) el.classList.add(c); else el.classList.remove(c);
+        return on;
+      },
+    },
+    dataset: {},
     getElementsByTagName() { return this.children; },
+    querySelectorAll() { return this.children; },
     getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
     setAttribute(k, v) { this.attrs[k] = String(v); },
     addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); },
     focus() {},
-    click() { if (this.onclick) this.onclick(); },
+    click() {
+      if (this.onclick) this.onclick({ preventDefault() {} });
+      (this.listeners.click || []).forEach((f) => f({ preventDefault() {} }));
+    },
     getContext() { return ctx2d; },
   };
+  return el;
 }
 
 // 0~1 사이 고정 난수 (mulberry32)
@@ -92,6 +116,8 @@ function loadGame(opts) {
   const document = {
     getElementById(id) { return (els[id] = els[id] || makeElement(id, ctx2d)); },
     getElementsByTagName() { return []; },
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
     body: makeElement("body", ctx2d),
   };
 
@@ -204,7 +230,7 @@ function requests(g, url) { return g.xhrs.filter((x) => x.sent && (!url || x.url
 
 /** 화면의 요소 (id 로) */
 function el(g, id) { return g.document.getElementById(id); }
-function click(g, id) { el(g, id).onclick(); }
+function click(g, id) { el(g, id).click(); }
 function openBoard(g) { g.ctx.fnOpenBoard(); }
 
 module.exports = {
