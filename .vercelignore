@@ -4,3 +4,5 @@
 supabase
 .env*
 .claude
+tests
+docs
