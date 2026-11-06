@@ -1,7 +1,7 @@
 // 터보 레이서 - 설정값 (숫자는 전부 여기)
 //
 // 트랙/물리 숫자를 바꾸면 다른 버전 클라이언트와 진행도가 어긋나고,
-// tests/client/golden.json 도 다시 기록해야 한다 (CLAUDE.md 참고).
+// tests/client/golden.json 도 다시 기록해야 한다 (public/CLAUDE.md, tests/CLAUDE.md 참고).
 // 서버 쪽 규칙(인원, 색, 시간)은 room.py 와 Supabase tr_api 에도 있다.
 (function (TR) {
   "use strict";

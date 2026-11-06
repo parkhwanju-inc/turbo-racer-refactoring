@@ -3,7 +3,7 @@
 방 하나의 게임 규칙 (로컬 서버용).
 
 배포판은 같은 규칙을 supabase/migrations/*.sql 의 tr_api 가 따로 구현한다.
-여기 상수나 규칙을 바꾸면 SQL 쪽도 같이 바꿔야 한다 (CLAUDE.md 참고).
+여기 상수나 규칙을 바꾸면 SQL 쪽도 같이 바꿔야 한다 (supabase/CLAUDE.md 참고).
 """
 import threading
 import time
