@@ -15,6 +15,7 @@ HTTP 요청/응답만 보므로, server.py 를 쪼개거나 다시 짜도 그대
 """
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -213,8 +214,11 @@ class TestBasics(ApiTestCase):
         status, html, _ = self.raw("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn("터보 레이서", html)
-        status, _, _ = self.raw("GET", "/game.js")
-        self.assertEqual(status, 200)
+        scripts = re.findall(r'<script[^>]*\ssrc="([^"]+)"', html, re.I)
+        self.assertTrue(scripts, "index.html 에 스크립트가 있어야 해요")
+        for src in scripts + ["style.css"]:
+            status, _, _ = self.raw("GET", "/" + src)
+            self.assertEqual(status, 200, src)
 
     @local_only
     def test_invalid_json_body_is_treated_as_empty(self):

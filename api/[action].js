@@ -1,141 +1,106 @@
 /*
- * api/[action].js
- * 터보레이서 API 중계 (Vercel -> Supabase)
- *
- * 2009.07  최초작성
- * 2009.08  https 모듈로 바꿈 (request 모듈 설치 안됨)
- * 2009.08  BOM 문제 수정 -- 윈도우에서 환경변수 넣으면 앞에 이상한 글자 붙음!!!
- *
- * TODO: 에러처리 제대로 하기
- * FIXME: GET 이랑 POST 코드 중복 (시간없음)
+ * Vercel 서버리스 함수: /api/<action> 를 Supabase RPC tr_api(p_action, p_body) 로 넘긴다.
+ * 게임 로직은 없다. tr_api 가 {status, body} 를 주면 그대로 HTTP 상태/본문으로 돌려준다.
  */
-var https = require('https');
-var urlmod = require('url');
+var https = require("https");
 
-var SB_URL = process.env.SUPABASE_URL;
-if (!SB_URL) SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-if (!SB_URL) SB_URL = '';
-var SB_KEY = process.env.SUPABASE_ANON_KEY;
-if (!SB_KEY) SB_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-if (!SB_KEY) SB_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
-if (!SB_KEY) SB_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-if (!SB_KEY) SB_KEY = '';
+var GET_ACTIONS = ["state", "leaderboard"];
+var POST_ACTIONS = ["join", "leave", "update", "start", "finish", "reset", "settings"];
+var MAX_IDS = 8;
+var MAX_BODY = 10000;
 
-// BOM, 공백 제거 (trim 안먹는 경우 있어서 직접함)
-while (SB_URL.length > 0 && (SB_URL.charCodeAt(0) == 65279 || SB_URL.charAt(0) == ' ' || SB_URL.charAt(0) == '\n' || SB_URL.charAt(0) == '\r' || SB_URL.charAt(0) == '\t')) SB_URL = SB_URL.substring(1);
-while (SB_URL.length > 0 && (SB_URL.charCodeAt(SB_URL.length - 1) == 65279 || SB_URL.charAt(SB_URL.length - 1) == ' ' || SB_URL.charAt(SB_URL.length - 1) == '\n' || SB_URL.charAt(SB_URL.length - 1) == '\r' || SB_URL.charAt(SB_URL.length - 1) == '\t' || SB_URL.charAt(SB_URL.length - 1) == '/')) SB_URL = SB_URL.substring(0, SB_URL.length - 1);
-while (SB_KEY.length > 0 && (SB_KEY.charCodeAt(0) == 65279 || SB_KEY.charAt(0) == ' ' || SB_KEY.charAt(0) == '\n' || SB_KEY.charAt(0) == '\r' || SB_KEY.charAt(0) == '\t')) SB_KEY = SB_KEY.substring(1);
-while (SB_KEY.length > 0 && (SB_KEY.charCodeAt(SB_KEY.length - 1) == 65279 || SB_KEY.charAt(SB_KEY.length - 1) == ' ' || SB_KEY.charAt(SB_KEY.length - 1) == '\n' || SB_KEY.charAt(SB_KEY.length - 1) == '\r' || SB_KEY.charAt(SB_KEY.length - 1) == '\t')) SB_KEY = SB_KEY.substring(0, SB_KEY.length - 1);
-
-//var DEBUG = true;
-var DEBUG = false;
-
-module.exports = function (req, res) {
-  var act = '' + (req.query.action || '');
-  var i, j, tmp, tmp2, ids, body, flg;
-
-  res.setHeader('Cache-Control', 'no-store');
-
-  // 허용된 주소만 (switch 쓰면 IE에서... 아 여긴 서버구나)
-  flg = 0;
-  if (req.method == 'GET') {
-    if (act == 'state' || act == 'leaderboard') flg = 1;
-  } else if (req.method == 'POST') {
-    if (act == 'join' || act == 'leave' || act == 'update' || act == 'start' || act == 'finish' || act == 'reset' || act == 'settings') flg = 1;
+// 첫 번째로 값이 있는 환경변수. 앞뒤 공백과 BOM(윈도우에서 붙여 넣으면 생김)은 지운다
+function env(names) {
+  for (var i = 0; i < names.length; i++) {
+    var v = process.env[names[i]];
+    if (v) return v.trim();     // String.prototype.trim 은 BOM(U+FEFF)도 지운다
   }
-  if (flg == 0) {
-    res.statusCode = 404;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ error: 'not found' }));
-    return;
-  }
-  if (SB_URL == '' || SB_KEY == '') {
-    res.statusCode = 500;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ error: '서버 설정(SUPABASE_URL / SUPABASE_ANON_KEY)이 없어요' }));
-    return;
-  }
+  return "";
+}
 
-  if (act == 'state') {
-    // ?ids=a,b&id=c  -> ['a','b','c']  (최대 8개)
-    tmp = [];
-    if (req.query.ids) {
-      if (typeof req.query.ids == 'string') tmp.push(req.query.ids);
-      else for (i = 0; i < req.query.ids.length; i++) tmp.push(req.query.ids[i]);
-    }
-    if (req.query.id) {
-      if (typeof req.query.id == 'string') tmp.push(req.query.id);
-      else for (i = 0; i < req.query.id.length; i++) tmp.push(req.query.id[i]);
-    }
-    tmp2 = tmp.join(',').split(',');
-    ids = [];
-    for (j = 0; j < tmp2.length; j++) {
-      if (tmp2[j] != '' && ids.length < 8) ids.push(tmp2[j]);
-    }
-    body = { ids: ids };
-  } else if (req.method == 'POST') {
-    body = req.body;
-    if (typeof body == 'string') {
-      if (body.length > 10000) {
-        body = {};
-      } else {
-        try {
-          body = JSON.parse(body);
-        } catch (e) {
-          body = {};
-        }
-      }
-    }
-    if (body == null || typeof body != 'object' || Object.prototype.toString.call(body) == '[object Array]') body = {};
-  } else {
-    body = {};
+var SB_URL = env(["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]).replace(/\/+$/, "");
+var SB_KEY = env(["SUPABASE_ANON_KEY", "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+                  "SUPABASE_PUBLISHABLE_KEY", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"]);
+
+function sendJson(res, status, obj) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(obj));
+}
+
+function isAllowed(method, action) {
+  if (method == "GET") return GET_ACTIONS.indexOf(action) > -1;
+  if (method == "POST") return POST_ACTIONS.indexOf(action) > -1;
+  return false;
+}
+
+// ?ids=a,b&id=c -> ['a', 'b', 'c'] (빈 값 빼고 최대 8개). 같은 이름이 여러 번 오면 배열로 온다
+function stateIds(query) {
+  var parts = [].concat(query.ids || [], query.id || []);
+  return parts.join(",").split(",").filter(function (s) { return s != ""; }).slice(0, MAX_IDS);
+}
+
+// Vercel 이 JSON 을 미리 풀어 주기도 하고 문자열로 주기도 한다. JSON 객체가 아니면 {}
+function postBody(raw) {
+  var body = raw;
+  if (typeof body == "string") {
+    if (body.length > MAX_BODY) return {};
+    try { body = JSON.parse(body); } catch (e) { return {}; }
   }
+  if (body == null || typeof body != "object" || Array.isArray(body)) return {};
+  return body;
+}
 
-  var u = urlmod.parse(SB_URL + '/rest/v1/rpc/tr_api');
-  var postData = JSON.stringify({ p_action: act, p_body: body });
-  var hdr = {};
-  hdr['apikey'] = SB_KEY;
-  hdr['Content-Type'] = 'application/json';
-  hdr['Content-Length'] = Buffer.byteLength(postData);
-  // sb_publishable_ 키는 JWT 아님 -> Authorization 넣으면 에러남 (2009.08 반나절 날림)
-  if (SB_KEY.substring(0, 3) != 'sb_') hdr['Authorization'] = 'Bearer ' + SB_KEY;
+function connectFailed(res, e) {
+  console.error(e);
+  sendJson(res, 502, { error: "데이터베이스에 연결하지 못했어요" });
+}
 
-  var r2 = https.request({
-    hostname: u.hostname,
-    port: u.port || 443,
-    path: u.path,
-    method: 'POST',
-    headers: hdr
+function callSupabase(action, body, res) {
+  var url;
+  try { url = new URL(SB_URL + "/rest/v1/rpc/tr_api"); } catch (e) { return connectFailed(res, e); }   // 주소 설정이 잘못됨
+  var payload = JSON.stringify({ p_action: action, p_body: body });
+  var headers = {
+    apikey: SB_KEY,
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(payload)
+  };
+  // sb_publishable_ 키는 JWT 가 아니라서 Authorization 에 넣으면 Supabase 가 거부한다
+  if (SB_KEY.substring(0, 3) != "sb_") headers.Authorization = "Bearer " + SB_KEY;
+
+  var out = https.request({
+    hostname: url.hostname, port: url.port || 443, path: url.pathname + url.search, method: "POST", headers: headers
   }, function (resp) {
     var chunks = [];
-    resp.on('data', function (c) { chunks.push(c); });
-    resp.on('end', function () {
-      var txt = Buffer.concat(chunks).toString('utf8');
+    resp.on("data", function (c) { chunks.push(c); });
+    resp.on("end", function () {
       var data = null;
-      try {
-        data = JSON.parse(txt);
-      } catch (e) {
-        data = null;
-      }
-      if (DEBUG) console.log('supabase', resp.statusCode, txt);
-      if (resp.statusCode < 200 || resp.statusCode > 299 || data == null || typeof data.status != 'number') {
-        console.error('supabase error', resp.statusCode, data);
-        res.statusCode = 502;
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: '데이터베이스 오류' }));
+      try { data = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch (e) { /* 아래에서 오류 처리 */ }
+      if (resp.statusCode < 200 || resp.statusCode > 299 || data == null || typeof data.status != "number") {
+        console.error("supabase error", resp.statusCode, data);
+        sendJson(res, 502, { error: "데이터베이스 오류" });
         return;
       }
-      res.statusCode = data.status;
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.end(JSON.stringify(data.body));
+      sendJson(res, data.status, data.body);
     });
   });
-  r2.on('error', function (e) {
-    console.error(e);
-    res.statusCode = 502;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ error: '데이터베이스에 연결하지 못했어요' }));
-  });
-  r2.write(postData);
-  r2.end();
+  out.on("error", function (e) { connectFailed(res, e); });
+  out.write(payload);
+  out.end();
+}
+
+module.exports = function (req, res) {
+  var action = "" + (req.query.action || "");
+  res.setHeader("Cache-Control", "no-store");
+
+  if (!isAllowed(req.method, action)) return sendJson(res, 404, { error: "not found" });
+  if (!SB_URL || !SB_KEY) {
+    return sendJson(res, 500, { error: "서버 설정(SUPABASE_URL / SUPABASE_ANON_KEY)이 없어요" });
+  }
+
+  var body;
+  if (action == "state") body = { ids: stateIds(req.query) };
+  else if (req.method == "POST") body = postBody(req.body);
+  else body = {};
+  callSupabase(action, body, res);
 };

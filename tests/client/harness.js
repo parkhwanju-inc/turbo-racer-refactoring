@@ -1,7 +1,8 @@
-// game.js 를 브라우저 없이 Node 에서 띄우는 도구.
+// 게임 클라이언트를 브라우저 없이 Node 에서 띄우는 도구.
 //
-// 가짜 DOM / 캔버스 / 저장소 / XHR / 시계를 넣고 game.js 를 vm 컨텍스트에서 실행한다.
-// game.js 의 전역 이름(fnPhysics, g_aTrack ...)은 **이 파일에서만** 쓴다.
+// 가짜 DOM / 캔버스 / 저장소 / XHR / 시계를 넣고, index.html 이 부르는 스크립트를
+// 같은 순서로 vm 컨텍스트 하나에서 실행한다.
+// 게임 코드의 내부 이름(window.TR.*)은 **이 파일에서만** 쓴다.
 // 리팩토링으로 이름이나 파일 구조가 바뀌면 테스트 파일은 그대로 두고 여기만 맞춘다.
 "use strict";
 const fs = require("fs");
@@ -9,7 +10,14 @@ const path = require("path");
 const vm = require("vm");
 
 // TR_APP_DIR: 다른 폴더의 코드로 돌리기 (API 테스트와 같은 변수)
-const GAME_JS = path.join(process.env.TR_APP_DIR || path.join(__dirname, "..", ".."), "public", "game.js");
+const PUBLIC = path.join(process.env.TR_APP_DIR || path.join(__dirname, "..", ".."), "public");
+
+function scriptFiles() {
+  const html = fs.readFileSync(path.join(PUBLIC, "index.html"), "utf8");
+  const srcs = [...html.matchAll(/<script[^>]*\ssrc="([^"]+)"/gi)].map((m) => m[1]);
+  if (!srcs.length) throw new Error("index.html 에서 스크립트를 못 찾았어요");
+  return srcs.map((s) => path.join(PUBLIC, s));
+}
 
 // ------------------------------------------------------------ 가짜 브라우저
 function makeStorage(init) {
@@ -86,7 +94,7 @@ function seededRandom(seed) {
 }
 
 /**
- * game.js 를 새로 불러온다. 부를 때마다 완전히 새 전역 상태.
+ * 게임을 새로 불러온다. 부를 때마다 완전히 새 전역 상태.
  * opts.local / opts.session : localStorage / sessionStorage 초기값
  * opts.seed : Math.random 고정 (기본 1)
  */
@@ -139,20 +147,23 @@ function loadGame(opts) {
   sandbox.window = sandbox;
   const ctx = vm.createContext(sandbox);
   vm.runInContext("Math.random = __rng;", ctx);
-  vm.runInContext(fs.readFileSync(GAME_JS, "utf8"), ctx, { filename: GAME_JS });
+  for (const file of scriptFiles()) {
+    vm.runInContext(fs.readFileSync(file, "utf8"), ctx, { filename: file });
+  }
 
-  return { ctx, els, xhrs, clock, alerts, winListeners, document, sandbox };
+  return { ctx, TR: sandbox.TR, els, xhrs, clock, alerts, winListeners, document, sandbox };
 }
 
-// ------------------------------------------------------------ game.js 에 접근 (이름 의존은 여기만)
+// ------------------------------------------------------------ 게임 코드에 접근 (이름 의존은 여기만)
 function track(g) {
-  const c = g.ctx;
-  return { n: c.g_nN, points: c.g_aTrack, pads: c.g_aPads, boxes: c.g_aBoxes, trees: c.g_aTrees, bounds: c.g_objBounds };
+  const t = g.TR.track;
+  return { n: t.n, points: t.points, pads: t.pads, boxes: t.boxes, trees: t.trees, bounds: t.bounds };
 }
-const fmtTime = (g, ms) => g.ctx.fnFmtTime(ms);
-const escHtml = (g, v) => g.ctx.fnEscHtml(v);
-const gridPos = (g, slot) => g.ctx.fnGridPos(slot);
-const difficulty = (g, name) => g.ctx.g_objDiff[name];
+const fmtTime = (g, ms) => g.TR.util.fmtTime(ms);
+const escHtml = (g, v) => g.TR.util.escHtml(v);
+const gridPos = (g, slot) => g.TR.track.gridPos(slot);
+const difficulty = (g, name) => g.TR.config.DIFFICULTY[name];
+const gameState = (g) => g.TR.game.state;
 
 function serverNowSec() { return Date.now() / 1000; }
 
@@ -171,19 +182,19 @@ function makePlayer(p) {
 
 /** 이 브라우저가 맡은 차 목록을 정하고 (참가가 끝난 상태) */
 function setLocals(g, locals) {
-  g.ctx.g_aLocals = locals.map((o) => g.ctx.fnNewLocal({ id: o.id, ai: !!o.ai }));
-  g.ctx.g_strScreen = "lobby";
+  gameState(g).locals = locals.map((o) => g.TR.game.newLocal({ id: o.id, ai: !!o.ai }));
+  gameState(g).screen = "lobby";
 }
 
 /** 서버 응답이 온 것처럼 상태를 넘긴다 */
-function receiveState(g, state) { g.ctx.fnOnState(state); }
+function receiveState(g, state) { g.TR.game.onState(state); }
 
-function screen(g) { return g.ctx.g_strScreen; }
-function locals(g) { return Array.from(g.ctx.g_aLocals); }   // vm 안 배열 -> 바깥 배열 (deepEqual 용)
-function local(g, id) { return g.ctx.g_aLocals.find((l) => l.id === id); }
+function screen(g) { return gameState(g).screen; }
+function locals(g) { return Array.from(gameState(g).locals); }   // vm 안 배열 -> 바깥 배열 (deepEqual 용)
+function local(g, id) { return gameState(g).locals.find((l) => l.id === id); }
 function car(g, id) { return local(g, id).car; }
-function remotes(g) { return g.ctx.g_objRemotes; }
-function serverOffset(g) { return g.ctx.g_nOffset; }
+function remotes(g) { return gameState(g).remotes; }
+function serverOffset(g) { return g.TR.net.clock.offset; }
 
 /**
  * 레이스 시작 상태로 만든다.
@@ -204,7 +215,7 @@ function startRace(g, o) {
 /** 물리 한 단계 (메인 루프 없이). dt 초 */
 function physicsStep(g, id, input, dt) {
   g.clock.now += dt * 1000;
-  g.ctx.fnPhysics(local(g, id), input, dt);
+  g.TR.game.stepLocal(local(g, id), input, dt);
 }
 
 /** 메인 루프 n 프레임 (60fps) */
@@ -212,7 +223,7 @@ function frames(g, n, fps) {
   const step = 1000 / (fps || 60);
   for (let i = 0; i < n; i++) {
     g.clock.now += step;
-    g.ctx.fnMainLoop(g.clock.now);
+    g.TR.game.mainLoop(g.clock.now);
   }
 }
 
@@ -221,9 +232,9 @@ function keyUp(g, code) { (g.winListeners.keyup || []).forEach((f) => f({ code, 
 
 /** 위치 보내기 폴링 1번 강제 */
 function netTick(g) {
-  g.ctx.g_nLastPoll = 0;
-  g.ctx.g_bBusy = false;
-  g.ctx.fnNetTick();
+  gameState(g).lastPoll = 0;
+  gameState(g).busy = false;
+  g.TR.game.netTick();
 }
 
 function requests(g, url) { return g.xhrs.filter((x) => x.sent && (!url || x.url === url)); }
@@ -231,7 +242,7 @@ function requests(g, url) { return g.xhrs.filter((x) => x.sent && (!url || x.url
 /** 화면의 요소 (id 로) */
 function el(g, id) { return g.document.getElementById(id); }
 function click(g, id) { el(g, id).click(); }
-function openBoard(g) { g.ctx.fnOpenBoard(); }
+function openBoard(g) { g.TR.ui.openBoard(); }
 
 module.exports = {
   loadGame, track, fmtTime, escHtml, gridPos, difficulty, makeState, makePlayer, setLocals, receiveState,
