@@ -2,6 +2,8 @@
 
 3명 이상이 함께 하는 브라우저 자동차 경주 게임.
 
+🎮 **바로 플레이: https://turbo-racer-gules.vercel.app**
+
 ## 구조
 
 | 위치 | 역할 |
